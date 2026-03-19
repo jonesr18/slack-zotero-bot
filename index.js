@@ -100,14 +100,14 @@ async function saveToZotero(url, postedBy) {
   );
 
   // Check item key Zotero assigned (https://api.zotero.org/groups/{GROUP_ID}/items/{ITEM_KEY}?key={YOUR_API_KEY})
-  const responseText = await res.text();
-  console.log(`Zotero response ${res.status}:`, responseText);
+  const text = await res.text();
+  console.log(`Zotero response ${res.status}:`, text);
   
   if (!res.ok) {
-    throw new Error(`Zotero API error ${responseText.status}: ${text}`);
+    throw new Error(`Zotero API error: ${res.status}: ${text}`);
   }
 
-  return res.json();
+  return JSON.parse(responseText);
 }
 
 // ─── Slack: add a reaction to a message ─────────────────────────────────────
