@@ -172,6 +172,22 @@ async function addReaction(channel, timestamp, emoji = "white_check_mark") {
   });
 }
 
+// ─── Slack: add a comment to a message ─────────────────────────────────────
+async function postThreadReply(channel, timestamp, text) {
+  await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      channel,
+      thread_ts: timestamp,
+      text,
+    }),
+  });
+}
+
 // ─── Parse raw body for signature verification ──────────────────────────────
 // Parse raw body for signature verification
 app.use((req, res, next) => {
@@ -212,18 +228,37 @@ app.post("/slack/events", async (req, res) => {
   const newUrls = urls.filter((u) => !seenLinks.has(u));
   if (!newUrls.length) return;
 
+  let anySuccess = false;
+  const failures = [];
+
   for (const url of newUrls) {
     try {
       await saveToZotero(url, event.user);
       seenLinks.add(url);
       console.log(`✅ Saved: ${url}`);
+      anySuccess = true;
     } catch (err) {
       console.error(`❌ Failed to save ${url}:`, err.message);
+      failures.push({ url, message: err.message });
     }
   }
 
-  // React once to confirm (even if multiple links were saved)
-  await addReaction(event.channel, event.ts);
+  // React based on outcome
+  if (failures.length === 0) {
+    await addReaction(event.channel, event.ts, "white_check_mark");
+  } else if (!anySuccess) {
+    await addReaction(event.channel, event.ts, "x");
+    await postThreadReply(event.channel, event.ts,
+      `❌ Failed to save the following links:\n${failures.map(f => `• ${f.url}: ${f.message}`).join("\n")}`
+    );
+  } else {
+    // Mixed
+    await addReaction(event.channel, event.ts, "white_check_mark");
+    await addReaction(event.channel, event.ts, "x");
+    await postThreadReply(event.channel, event.ts,
+      `⚠️ Some links could not be saved:\n${failures.map(f => `• ${f.url}: ${f.message}`).join("\n")}`
+    );
+  }
 });
 
 const PORT = process.env.PORT || 8080;
