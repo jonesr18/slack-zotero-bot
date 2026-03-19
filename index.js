@@ -256,7 +256,7 @@ app.post("/slack/events", async (req, res) => {
     await addReaction(event.channel, event.ts, "white_check_mark");
     await addReaction(event.channel, event.ts, "x");
     await postThreadReply(event.channel, event.ts,
-      `⚠️ Some links could not be saved:\n${failures.map(f => `• ${f.url}: ${f.message}`).join("\n")}`
+      `❌ Failed to save the following links:\n${failures.map(f => `• ${f.url}: ${f.message}`).join("\n")}`
     );
   }
 });
