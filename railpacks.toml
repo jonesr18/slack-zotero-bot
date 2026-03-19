@@ -1,0 +1,5 @@
+[config]
+builder = "node"
+
+[start]
+cmd = "node index.js"
