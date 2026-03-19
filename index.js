@@ -32,11 +32,41 @@ function verifySlackRequest(req) {
   return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
 }
 
+// Try to find DOI of paper
+async function extractDOI(url) {
+  try {
+    const res = await fetch(url, {
+      headers: {
+        // Spoof a browser user agent — some publishers block bots
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      }
+    });
+    const html = await res.text();
+
+    // Try meta tag first (most reliable)
+    const metaDOI = html.match(/<meta[^>]+name=["']dc\.identifier["'][^>]+content=["'](10\.\d{4,}\/[^\s"']+)["']/i)
+                 || html.match(/<meta[^>]+content=["'](10\.\d{4,}\/[^\s"']+)["'][^>]+name=["']dc\.identifier["']/i)
+                 || html.match(/<meta[^>]+name=["']citation_doi["'][^>]+content=["'](10\.\d{4,}\/[^\s"']+)["']/i)
+                 || html.match(/<meta[^>]+content=["'](10\.\d{4,}\/[^\s"']+)["'][^>]+name=["']citation_doi["']/i);
+
+    if (metaDOI) return metaDOI[1];
+
+    // Fall back to DOI pattern anywhere in the page
+    const inlineDOI = html.match(/10\.\d{4,}\/[^\s"'<>]+/);
+    if (inlineDOI) return inlineDOI[0];
+
+    return null;
+  } catch (err) {
+    console.log(`Could not scrape DOI from ${url}:`, err.message);
+    return null;
+  }
+}
+
 // ─── Zotero: save a URL as a web page item ──────────────────────────────────
 async function saveToZotero(url, postedBy) {
-  // Extract DOI from URL if present (works for most publisher URLs)
-  const doiMatch = url.match(/10\.\d{4,}\/[^\s]+/);
-  const doi = doiMatch ? doiMatch[0] : null;
+  // Try to get DOI from URL pattern first, then scrape if not found
+  const urlDOI = url.match(/10\.\d{4,}\/[^\s]+/)?.[0];
+  const doi = urlDOI || await extractDOI(url);
 
   const item = {
     itemType: "journalArticle",
