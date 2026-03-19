@@ -73,7 +73,7 @@ async function saveToZotero(url, postedBy) {
     ? `groups/${process.env.ZOTERO_GROUP_ID}`
     : `users/${process.env.ZOTERO_USER_ID}`;
 
-  const fallback = 1;
+  const fallback = true;
   if (doi) {
     // Use Zotero's search endpoint to fetch full metadata from CrossRef
     console.log(`Looking up DOI: ${doi}`);
@@ -116,7 +116,7 @@ async function saveToZotero(url, postedBy) {
         lastName: a.lastName,
       }));
       delete item.authors;
-      fallback = null;
+      fallback = false;
     }
   }
 
