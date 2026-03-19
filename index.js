@@ -69,16 +69,16 @@ async function saveToZotero(url, postedBy) {
   const urlDOI = url.match(/10\.\d{4,}\/[^\s]+/)?.[0];
   const doi = urlDOI || await extractDOI(url);
 
-  const libraryPath = process.env.ZOTERO_GROUP_ID
-    ? `groups/${process.env.ZOTERO_GROUP_ID}`
-    : `users/${process.env.ZOTERO_USER_ID}`;
+  const libraryPath = ZOTERO_GROUP_ID
+    ? `groups/${ZOTERO_GROUP_ID}`
+    : `users/${ZOTERO_USER_ID}`;
 
-  const fallback = true;
+  let fallback = true;
   if (doi) {
     // Use Zotero's search endpoint to fetch full metadata from CrossRef
     console.log(`Looking up DOI: ${doi}`);
     const searchRes = await fetch(
-      `https://api.zotero.org/${libraryPath}/items?q=${encodeURIComponent(doi)}&qmode=everything&key=${process.env.ZOTERO_API_KEY}`,
+      `https://api.zotero.org/${libraryPath}/items?q=${encodeURIComponent(doi)}&qmode=everything&key=${ZOTERO_API_KEY}`,
     );
 
     // Fetch item data from CrossRef directly
@@ -106,7 +106,7 @@ async function saveToZotero(url, postedBy) {
           lastName: a.family || "",
         })),
         extra: `Shared by @${postedBy} in #papers`,
-        collections: process.env.ZOTERO_COLLECTION ? [process.env.ZOTERO_COLLECTION] : [],
+        collections: ZOTERO_COLLECTION ? [ZOTERO_COLLECTION] : [],
       };
 
       // Zotero expects authors in the creators field
