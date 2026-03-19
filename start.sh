@@ -1,2 +1,2 @@
 #!/bin/bash
-/nix/var/nix/profiles/default/bin/node index.js
+which node || find / -name "node" -type f 2>/dev/null
