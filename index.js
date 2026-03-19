@@ -73,7 +73,7 @@ async function saveToZotero(url, postedBy) {
     ? `groups/${ZOTERO_GROUP_ID}`
     : `users/${ZOTERO_USER_ID}`;
 
-  let fallback = true;
+  let item;
   if (doi) {
     // Use Zotero's search endpoint to fetch full metadata from CrossRef
     console.log(`Looking up DOI: ${doi}`);
@@ -90,7 +90,7 @@ async function saveToZotero(url, postedBy) {
       const csl = await crossRefRes.json();
       console.log(`CrossRef metadata:`, JSON.stringify(csl));
 
-      const item = {
+      item = {
         itemType: "journalArticle",
         title: csl.title || url,
         DOI: doi,
@@ -115,15 +115,14 @@ async function saveToZotero(url, postedBy) {
         firstName: a.firstName,
         lastName: a.lastName,
       }));
-      delete item.authors;
-      fallback = false;
+      delete item.authors;  
     }
   }
 
-  if (fallback) {
-    // Fallback: save as webpage if no DOI or CrossRef lookup failed
+  // Fallback: save as webpage if no DOI or CrossRef lookup failed
+  if (!item) {
     console.log(`No DOI found, saving as webpage`);
-    const item = {
+    item = {
       itemType: "journalArticle",
       url,
       title: url,                          // Zotero will auto-fetch the real title
