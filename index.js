@@ -42,8 +42,8 @@ async function extractDOI(url) {
       }
     });
     const html = await res.text();
-    console.log(html)
-    
+    // console.log(html)
+
     // Try meta tag first (most reliable)
     const metaDOI = html.match(/<meta[^>]+name=["']dc\.identifier["'][^>]+content=["'](10\.\d{4,}\/[^\s"']+)["']/i)
                  || html.match(/<meta[^>]+content=["'](10\.\d{4,}\/[^\s"']+)["'][^>]+name=["']dc\.identifier["']/i)
@@ -65,27 +65,73 @@ async function extractDOI(url) {
 
 // ─── Zotero: save a URL as a web page item ──────────────────────────────────
 async function saveToZotero(url, postedBy) {
-  // Try to get DOI from URL pattern first, then scrape if not found
+  // Try to extract DOI from URL first
   const urlDOI = url.match(/10\.\d{4,}\/[^\s]+/)?.[0];
   const doi = urlDOI || await extractDOI(url);
 
-  const item = {
-    itemType: "journalArticle",
-    url,
-    title: url,                          // Zotero will auto-fetch the real title
-    DOI: doi || "",
-    extra: `Shared by @${postedBy} in #papers`,
-    collections: ZOTERO_COLLECTION ? [ZOTERO_COLLECTION] : [],
-  };
+  const libraryPath = process.env.ZOTERO_GROUP_ID
+    ? `groups/${process.env.ZOTERO_GROUP_ID}`
+    : `users/${process.env.ZOTERO_USER_ID}`;
 
-  const libraryPath = ZOTERO_GROUP_ID
-    ? `groups/${ZOTERO_GROUP_ID}`
-    : `users/${ZOTERO_USER_ID}`;
+  if (doi) {
+    // Use Zotero's search endpoint to fetch full metadata from CrossRef
+    console.log(`Looking up DOI: ${doi}`);
+    const searchRes = await fetch(
+      `https://api.zotero.org/${libraryPath}/items?q=${encodeURIComponent(doi)}&qmode=everything&key=${process.env.ZOTERO_API_KEY}`,
+    );
+
+    // Fetch item data from CrossRef directly
+    const crossRefRes = await fetch(
+      `https://api.crossref.org/works/${encodeURIComponent(doi)}/transform/application/vnd.citationstyles.csl+json`
+    );
+
+    if (crossRefRes.ok) {
+      const csl = await crossRefRes.json();
+      console.log(`CrossRef metadata:`, JSON.stringify(csl));
+
+      const item = {
+        itemType: "journalArticle",
+        title: csl.title || url,
+        DOI: doi,
+        url,
+        publicationTitle: csl["container-title"] || "",
+        volume: csl.volume || "",
+        issue: csl.issue || "",
+        pages: csl.page || "",
+        date: csl.issued?.["date-parts"]?.[0]?.[0]?.toString() || "",
+        abstractNote: csl.abstract || "",
+        authors: (csl.author || []).map(a => ({
+          firstName: a.given || "",
+          lastName: a.family || "",
+        })),
+        extra: `Shared by @${postedBy} in #papers`,
+        collections: process.env.ZOTERO_COLLECTION ? [process.env.ZOTERO_COLLECTION] : [],
+      };
+
+      // Zotero expects authors in the creators field
+      item.creators = item.authors.map(a => ({
+        creatorType: "author",
+        firstName: a.firstName,
+        lastName: a.lastName,
+      }));
+      delete item.authors;
+    }
+  } else {
+    // Fallback: save as webpage if no DOI or CrossRef lookup failed
+    console.log(`No DOI found, saving as webpage`);
+    const item = {
+      itemType: "journalArticle",
+      url,
+      title: url,                          // Zotero will auto-fetch the real title
+      DOI: doi || "",
+      extra: `Shared by @${postedBy} in #papers`,
+      collections: ZOTERO_COLLECTION ? [ZOTERO_COLLECTION] : [],
+    };
+  }
 
   console.log(`Saving to: ${libraryPath}`);
   console.log(`Collection: ${ZOTERO_COLLECTION}`);
   console.log(`Item:`, JSON.stringify(item));
-  console.log(`DOI found: ${doi || "none"}`);
 
   const res = await fetch(
     `https://api.zotero.org/${libraryPath}/items`,
@@ -108,7 +154,7 @@ async function saveToZotero(url, postedBy) {
     throw new Error(`Zotero API error: ${res.status}: ${text}`);
   }
 
-  return JSON.parse(responseText);
+  return JSON.parse(text);
 }
 
 // ─── Slack: add a reaction to a message ─────────────────────────────────────
@@ -177,5 +223,5 @@ app.post("/slack/events", async (req, res) => {
   await addReaction(event.channel, event.ts);
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, "0.0.0.0", () => console.log(`Bot listening on :${PORT}`));
