@@ -62,6 +62,10 @@ async function saveToZotero(url, postedBy) {
       body: JSON.stringify([item]),
     }
   );
+  
+  // Check item key Zotero assigned (https://api.zotero.org/groups/{GROUP_ID}/items/{ITEM_KEY}?key={YOUR_API_KEY})
+  const responseText = await res.text();
+  console.log(`Zotero response ${res.status}:`, responseText);
 
   if (!res.ok) {
     const text = await res.text();
