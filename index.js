@@ -75,12 +75,17 @@ async function addReaction(channel, timestamp, emoji = "white_check_mark") {
 }
 
 // ─── Parse raw body for signature verification ──────────────────────────────
-app.use((req, _res, next) => {
+// Parse raw body for signature verification
+app.use((req, res, next) => {
   let data = "";
   req.on("data", (chunk) => (data += chunk));
   req.on("end", () => {
     req.rawBody = data;
-    req.body = JSON.parse(data || "{}");
+    try {
+      req.body = JSON.parse(data || "{}");
+    } catch {
+      req.body = {};
+    }
     next();
   });
 });
