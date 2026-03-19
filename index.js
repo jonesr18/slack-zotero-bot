@@ -34,11 +34,16 @@ function verifySlackRequest(req) {
 
 // ─── Zotero: save a URL as a web page item ──────────────────────────────────
 async function saveToZotero(url, postedBy) {
+  // Extract DOI from URL if present (works for most publisher URLs)
+  const doiMatch = url.match(/10\.\d{4,}\/[^\s]+/);
+  const doi = doiMatch ? doiMatch[0] : null;
+
   const item = {
-    itemType: "webpage",
+    itemType: "journalArticle",
     url,
     title: url,                          // Zotero will auto-fetch the real title
-    note: `Shared by @${postedBy} in #papers`,
+    DOI: doi || "",
+    extra: `Shared by @${postedBy} in #papers`,
     collections: ZOTERO_COLLECTION ? [ZOTERO_COLLECTION] : [],
   };
 
@@ -49,6 +54,7 @@ async function saveToZotero(url, postedBy) {
   console.log(`Saving to: ${libraryPath}`);
   console.log(`Collection: ${ZOTERO_COLLECTION}`);
   console.log(`Item:`, JSON.stringify(item));
+  console.log(`DOI found: ${doi || "none"}`);
 
   const res = await fetch(
     `https://api.zotero.org/${libraryPath}/items`,
@@ -62,14 +68,13 @@ async function saveToZotero(url, postedBy) {
       body: JSON.stringify([item]),
     }
   );
-  
+
   // Check item key Zotero assigned (https://api.zotero.org/groups/{GROUP_ID}/items/{ITEM_KEY}?key={YOUR_API_KEY})
   const responseText = await res.text();
   console.log(`Zotero response ${res.status}:`, responseText);
-
+  
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Zotero API error ${res.status}: ${text}`);
+    throw new Error(`Zotero API error ${responseText.status}: ${text}`);
   }
 
   return res.json();
