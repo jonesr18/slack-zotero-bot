@@ -1,0 +1,33 @@
+{
+    "display_information": {
+        "name": "Zotero Scraper",
+        "description": "Scrape channel for links to add to Zotero",
+        "background_color": "#ab1f00",
+        "long_description": "Add this bot to a channel to monitor links that are shared. The links can then be distributed to a bot server and subsequently added to a Zotero group. Ideally, after uploading the link to the server, the bot will add a checkmark ✅ to the message with the link."
+    },
+    "features": {
+        "bot_user": {
+            "display_name": "Zotero Scraper",
+            "always_online": false
+        }
+    },
+    "oauth_config": {
+        "scopes": {
+            "bot": [
+                "reactions:write",
+                "channels:history"
+            ]
+        }
+    },
+    "settings": {
+        "event_subscriptions": {
+            "request_url": "https://tbd/slack/events",
+            "bot_events": [
+                "message.channels"
+            ]
+        },
+        "org_deploy_enabled": false,
+        "socket_mode_enabled": false,
+        "token_rotation_enabled": false
+    }
+}
