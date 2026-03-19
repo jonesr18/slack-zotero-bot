@@ -42,7 +42,8 @@ async function extractDOI(url) {
       }
     });
     const html = await res.text();
-
+    console.log(html)
+    
     // Try meta tag first (most reliable)
     const metaDOI = html.match(/<meta[^>]+name=["']dc\.identifier["'][^>]+content=["'](10\.\d{4,}\/[^\s"']+)["']/i)
                  || html.match(/<meta[^>]+content=["'](10\.\d{4,}\/[^\s"']+)["'][^>]+name=["']dc\.identifier["']/i)
