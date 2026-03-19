@@ -123,4 +123,5 @@ app.post("/slack/events", async (req, res) => {
   await addReaction(event.channel, event.ts);
 });
 
-app.listen(3000, () => console.log("Bot listening on :3000"));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Bot listening on :${PORT}`));
