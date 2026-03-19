@@ -7,7 +7,7 @@ const app = express();
 const SLACK_BOT_TOKEN      = process.env.SLACK_BOT_TOKEN;       // xoxb-...
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
 const ZOTERO_API_KEY       = process.env.ZOTERO_API_KEY;
-const ZOTERO_USER_ID       = process.env.ZOTERO_USER_ID;        // numeric ID
+const ZOTERO_GROUP_ID       = process.env.ZOTERO_GROUP_ID;        // numeric ID
 const ZOTERO_COLLECTION    = process.env.ZOTERO_COLLECTION;     // 8-char key, optional
 
 // ─── Simple in-memory dedup (swap for Redis/SQLite in production) ───────────
@@ -42,7 +42,7 @@ async function saveToZotero(url, postedBy) {
   };
 
   const res = await fetch(
-    `https://api.zotero.org/users/${ZOTERO_USER_ID}/items`,
+    `https://api.zotero.org/groups/${ZOTERO_GROUP_ID}/items`,
     {
       method: "POST",
       headers: {
