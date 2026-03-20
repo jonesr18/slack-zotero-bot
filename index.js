@@ -4,12 +4,13 @@ import crypto from "crypto";
 const app = express();
 
 // ─── Config ────────────────────────────────────────────────────────────────
-const SLACK_BOT_TOKEN      = process.env.SLACK_BOT_TOKEN;       // xoxb-...
-const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
-const ZOTERO_API_KEY       = process.env.ZOTERO_API_KEY;
-const ZOTERO_USER_ID       = process.env.ZOTERO_USER_ID;        // numeric ID
-const ZOTERO_GROUP_ID      = process.env.ZOTERO_GROUP_ID;       // numeric ID
-const ZOTERO_COLLECTION    = process.env.ZOTERO_COLLECTION;     // 8-char key, optional
+const SLACK_BOT_TOKEN       = process.env.SLACK_BOT_TOKEN;       // xoxb-...
+const SLACK_SIGNING_SECRET  = process.env.SLACK_SIGNING_SECRET;
+const ZOTERO_API_KEY        = process.env.ZOTERO_API_KEY;
+const ZOTERO_USER_ID        = process.env.ZOTERO_USER_ID;        // numeric ID
+const ZOTERO_GROUP_ID       = process.env.ZOTERO_GROUP_ID;       // numeric ID
+const ZOTERO_COLLECTION     = process.env.ZOTERO_COLLECTION;     // 8-char key, optional
+const ZOTERO_COLLECTION_MAP = process.env.ZOTERO_COLLECTION_MAP; // dictionary, optional
 
 // ─── Simple in-memory dedup (swap for Redis/SQLite in production) ───────────
 const seenLinks = new Set();
@@ -31,6 +32,29 @@ function verifySlackRequest(req) {
 
   return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
 }
+
+// Extract tags from Slack message for Collection routing
+function extractTags(text) {
+  const tags = text.match(/!([a-zA-Z0-9_-]+)/g) || [];
+  return tags.map(t => t.slice(1).toLowerCase()); // strip the # and lowercase
+}
+
+function resolveCollections(tags) {
+  let collectionMap = {};
+  try {
+    collectionMap = JSON.parse(ZOTERO_COLLECTION_MAP || "{}");
+  } catch {
+    console.log("Could not parse ZOTERO_COLLECTION_MAP");
+  }
+
+  const matched = tags
+    .filter(t => collectionMap[t])
+    .map(t => collectionMap[t]);
+
+  // Fall back to default collection if no tags matched
+  return matched.length > 0 ? matched : (ZOTERO_COLLECTION ? [ZOTERO_COLLECTION] : []);
+}
+
 
 // Try to find DOI of paper
 async function extractDOI(url) {
@@ -132,7 +156,7 @@ async function saveToZotero(url, postedBy) {
     };
   }
 
-  console.log(`Saving to: ${libraryPath}`);
+  console.log(`Saving to: ${libraryPath}, collection: ${collections}`);
   console.log(`Collection: ${ZOTERO_COLLECTION}`);
   console.log(`Item:`, JSON.stringify(item));
 
@@ -152,11 +176,7 @@ async function saveToZotero(url, postedBy) {
   // Check item key Zotero assigned (https://api.zotero.org/groups/{GROUP_ID}/items/{ITEM_KEY}?key={YOUR_API_KEY})
   const text = await res.text();
   console.log(`Zotero response ${res.status}:`, text);
-  
-  if (!res.ok) {
-    throw new Error(`Zotero API error: ${res.status}: ${text}`);
-  }
-
+  if (!res.ok) {throw new Error(`Zotero API error: ${res.status}: ${text}`)};
   return JSON.parse(text);
 }
 
@@ -228,12 +248,18 @@ app.post("/slack/events", async (req, res) => {
   const newUrls = urls.filter((u) => !seenLinks.has(u));
   if (!newUrls.length) return;
 
+  // Extract tags from the message
+  const tags = extractTags(event.text || "");
+  const collections = resolveCollections(tags);
+  console.log(`Tags found: ${tags.join(", ") || "none"}`);
+  console.log(`Resolved collections: ${collections.join(", ")}`);
+
   let anySuccess = false;
   const failures = [];
 
   for (const url of newUrls) {
     try {
-      await saveToZotero(url, event.user);
+      await saveToZotero(url, event.user, collections);
       seenLinks.add(url);
       console.log(`✅ Saved: ${url}`);
       anySuccess = true;
