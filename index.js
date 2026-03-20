@@ -87,8 +87,63 @@ async function extractDOI(url) {
   }
 }
 
-// ─── Zotero: save a URL as a web page item ──────────────────────────────────
-async function saveToZotero(url, postedBy) {
+// Scrape webpage for citation information
+async function scrapeMetadata(url) {
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      }
+    });
+    const html = await res.text();
+
+    function getMeta(name) {
+      const match = html.match(new RegExp(`<meta[^>]+name=["']${name}["'][^>]+content=["']([^"']+)["']`, "i"))
+                 || html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${name}["']`, "i"));
+      return match ? match[1].trim() : null;
+    }
+
+    function getAllMeta(name) {
+      const regex = new RegExp(`<meta[^>]+name=["']${name}["'][^>]+content=["']([^"']+)["']`, "gi");
+      const results = [];
+      let match;
+      while ((match = regex.exec(html)) !== null) results.push(match[1].trim());
+      return results;
+    }
+
+    const title = getMeta("citation_title");
+    if (!title) return null; // not a paper page
+
+    // Parse authors — each author is a separate meta tag
+    const authorStrings = getAllMeta("citation_author");
+    const creators = authorStrings.map(a => {
+      const parts = a.split(",").map(p => p.trim());
+      return {
+        creatorType: "author",
+        lastName: parts[0] || "",
+        firstName: parts[1] || "",
+      };
+    });
+
+    const doi = getMeta("citation_doi");
+    const date = getMeta("citation_publication_date") || getMeta("citation_online_date");
+    const journal = getMeta("citation_journal_title") || getMeta("citation_publisher");
+    const abstract = getMeta("dc.description") || getMeta("citation_abstract");
+    const volume = getMeta("citation_volume");
+    const issue = getMeta("citation_issue");
+    const pages = getMeta("citation_firstpage") && getMeta("citation_lastpage")
+      ? `${getMeta("citation_firstpage")}–${getMeta("citation_lastpage")}`
+      : getMeta("citation_firstpage") || null;
+
+    return { title, creators, doi, date, journal, abstract, volume, issue, pages };
+  } catch (err) {
+    console.log(`Could not scrape metadata from ${url}:`, err.message);
+    return null;
+  }
+}
+
+// ─── Zotero: save a URL as a journalArticle item ──────────────────────────────────
+async function saveToZotero(url, postedBy, collections) {
   // Try to extract DOI from URL first
   const urlDOI = url.match(/10\.\d{4,}\/[^\s]+/)?.[0];
   const doi = urlDOI || await extractDOI(url);
@@ -98,22 +153,17 @@ async function saveToZotero(url, postedBy) {
     : `users/${ZOTERO_USER_ID}`;
 
   let item;
+  
+  // ── Strategy 1: CrossRef via DOI ─────────────────────────────────────────
   if (doi) {
-    // Use Zotero's search endpoint to fetch full metadata from CrossRef
     console.log(`Looking up DOI: ${doi}`);
-    const searchRes = await fetch(
-      `https://api.zotero.org/${libraryPath}/items?q=${encodeURIComponent(doi)}&qmode=everything&key=${ZOTERO_API_KEY}`,
-    );
-
-    // Fetch item data from CrossRef directly
     const crossRefRes = await fetch(
       `https://api.crossref.org/works/${encodeURIComponent(doi)}/transform/application/vnd.citationstyles.csl+json`
     );
 
     if (crossRefRes.ok) {
       const csl = await crossRefRes.json();
-      console.log(`CrossRef metadata:`, JSON.stringify(csl));
-
+      console.log(`CrossRef metadata found`);
       item = {
         itemType: "journalArticle",
         title: csl.title || url,
@@ -125,34 +175,51 @@ async function saveToZotero(url, postedBy) {
         pages: csl.page || "",
         date: csl.issued?.["date-parts"]?.[0]?.[0]?.toString() || "",
         abstractNote: csl.abstract || "",
-        authors: (csl.author || []).map(a => ({
+        creators: (csl.author || []).map(a => ({
+          creatorType: "author",
           firstName: a.given || "",
           lastName: a.family || "",
         })),
         extra: `Shared by @${postedBy} in #papers`,
-        collections: ZOTERO_COLLECTION ? [ZOTERO_COLLECTION] : [],
+        collections,
       };
-
-      // Zotero expects authors in the creators field
-      item.creators = item.authors.map(a => ({
-        creatorType: "author",
-        firstName: a.firstName,
-        lastName: a.lastName,
-      }));
-      delete item.authors;  
     }
   }
 
-  // Fallback: save as webpage if no DOI or CrossRef lookup failed
+  // ── Strategy 2: Scrape citation meta tags from the page ──────────────────
   if (!item) {
-    console.log(`No DOI found, saving as webpage`);
+    console.log(`CrossRef failed or no DOI, scraping page metadata`);
+    const meta = await scrapeMetadata(url);
+
+    if (meta) {
+      console.log(`Scraped metadata: ${meta.title}`);
+      item = {
+        itemType: "journalArticle",
+        title: meta.title,
+        DOI: meta.doi || doi || "",
+        url,
+        publicationTitle: meta.journal || "",
+        volume: meta.volume || "",
+        issue: meta.issue || "",
+        pages: meta.pages || "",
+        date: meta.date || "",
+        abstractNote: meta.abstract || "",
+        creators: meta.creators,
+        extra: `Shared by @${postedBy} in #papers`,
+        collections,
+      };
+    }
+  }
+
+  // ── Strategy 3: Bare fallback ─────────────────────────────────────────────
+  if (!item) {
+    console.log(`No metadata found, saving bare URL`);
     item = {
-      itemType: "journalArticle",
+      itemType: "webpage",
       url,
-      title: url,                          // Zotero will auto-fetch the real title
-      DOI: doi || "",
+      title: url,
       extra: `Shared by @${postedBy} in #papers`,
-      collections: ZOTERO_COLLECTION ? [ZOTERO_COLLECTION] : [],
+      collections,
     };
   }
 
