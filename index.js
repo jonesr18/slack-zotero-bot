@@ -18,6 +18,25 @@ const seenLinks = new Set();
 // ─── URL regex ──────────────────────────────────────────────────────────────
 const URL_REGEX = /https?:\/\/[^\s>|]+/g;
 
+// ─── URL blocklist ───────────────────────────────────────────────────────────
+const BLOCKED_DOMAINS = new Set([
+  "slack.com",
+  "app.slack.com",
+  "twitter.com",
+  "x.com",
+  "bsky.app",
+  "linkedin.com"
+]);
+
+function isBlockedUrl(url) {
+  try {
+    const hostname = new URL(url).hostname;
+    return [...BLOCKED_DOMAINS].some(domain => hostname === domain || hostname.endsWith(`.${domain}`));
+  } catch {
+    return true; // block malformed URLs too
+  }
+}
+
 // ─── Slack request verification ─────────────────────────────────────────────
 function verifySlackRequest(req) {
   const timestamp = req.headers["x-slack-request-timestamp"];
@@ -310,6 +329,7 @@ app.post("/slack/events", async (req, res) => {
   if (!event || event.type !== "message" || event.subtype) return; // ignore edits/deletes
 
   const urls = [...new Set((event.text || "").match(URL_REGEX) || [])];
+  const filteredUrls = urls.filter(u => !isBlockedUrl(u));
   if (!urls.length) return;
 
   const newUrls = urls.filter((u) => !seenLinks.has(u));
