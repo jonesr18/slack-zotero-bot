@@ -15,6 +15,7 @@
         "scopes": {
             "bot": [
                 "reactions:write",
+                "chat:write",
                 "channels:history"
             ]
         }
