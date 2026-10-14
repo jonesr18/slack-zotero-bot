@@ -1,5 +1,6 @@
 import express from "express";
 import crypto from "crypto";
+import { resolveReference } from "./metadata.js";
 
 const app = express();
 
@@ -75,172 +76,16 @@ function resolveCollections(tags) {
 }
 
 
-// Try to find DOI of paper
-async function extractDOI(url) {
-  try {
-    const res = await fetch(url, {
-      headers: {
-        // Spoof a browser user agent — some publishers block bots
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      }
-    });
-    const html = await res.text();
-    // console.log(html)
-
-    // Try meta tag first (most reliable)
-    const metaDOI = html.match(/<meta[^>]+name=["']dc\.identifier["'][^>]+content=["'](10\.\d{4,}\/[^\s"']+)["']/i)
-                 || html.match(/<meta[^>]+content=["'](10\.\d{4,}\/[^\s"']+)["'][^>]+name=["']dc\.identifier["']/i)
-                 || html.match(/<meta[^>]+name=["']citation_doi["'][^>]+content=["'](10\.\d{4,}\/[^\s"']+)["']/i)
-                 || html.match(/<meta[^>]+content=["'](10\.\d{4,}\/[^\s"']+)["'][^>]+name=["']citation_doi["']/i);
-
-    if (metaDOI) return metaDOI[1];
-
-    // Fall back to DOI pattern anywhere in the page
-    const inlineDOI = html.match(/10\.\d{4,}\/[^\s"'<>]+/);
-    if (inlineDOI) return inlineDOI[0];
-
-    return null;
-  } catch (err) {
-    console.log(`Could not scrape DOI from ${url}:`, err.message);
-    return null;
-  }
-}
-
-// Scrape webpage for citation information
-async function scrapeMetadata(url) {
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      }
-    });
-    const html = await res.text();
-
-    function getMeta(name) {
-      const match = html.match(new RegExp(`<meta[^>]+name=["']${name}["'][^>]+content=["']([^"']+)["']`, "i"))
-                 || html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${name}["']`, "i"));
-      return match ? match[1].trim() : null;
-    }
-
-    function getAllMeta(name) {
-      const regex = new RegExp(`<meta[^>]+name=["']${name}["'][^>]+content=["']([^"']+)["']`, "gi");
-      const results = [];
-      let match;
-      while ((match = regex.exec(html)) !== null) results.push(match[1].trim());
-      return results;
-    }
-
-    const title = getMeta("citation_title");
-    if (!title) return null; // not a paper page
-
-    // Parse authors — each author is a separate meta tag
-    const authorStrings = getAllMeta("citation_author");
-    const creators = authorStrings.map(a => {
-      const parts = a.split(",").map(p => p.trim());
-      return {
-        creatorType: "author",
-        lastName: parts[0] || "",
-        firstName: parts[1] || "",
-      };
-    });
-
-    const doi = getMeta("citation_doi");
-    const date = getMeta("citation_publication_date") || getMeta("citation_online_date");
-    const journal = getMeta("citation_journal_title") || getMeta("citation_publisher");
-    const abstract = getMeta("dc.description") || getMeta("citation_abstract");
-    const volume = getMeta("citation_volume");
-    const issue = getMeta("citation_issue");
-    const pages = getMeta("citation_firstpage") && getMeta("citation_lastpage")
-      ? `${getMeta("citation_firstpage")}–${getMeta("citation_lastpage")}`
-      : getMeta("citation_firstpage") || null;
-
-    return { title, creators, doi, date, journal, abstract, volume, issue, pages };
-  } catch (err) {
-    console.log(`Could not scrape metadata from ${url}:`, err.message);
-    return null;
-  }
-}
-
-// ─── Zotero: save a URL as a journalArticle item ──────────────────────────────────
+// ─── Zotero: resolve reference metadata and save ─────────────────────────────
 async function saveToZotero(url, postedBy, collections) {
-  // Try to extract DOI from URL first
-  const urlDOI = url.match(/10\.\d{4,}\/[^\s]+/)?.[0];
-  const doi = urlDOI || await extractDOI(url);
-
   const libraryPath = ZOTERO_GROUP_ID
     ? `groups/${ZOTERO_GROUP_ID}`
     : `users/${ZOTERO_USER_ID}`;
-
-  let item;
-  
-  // ── Strategy 1: CrossRef via DOI ─────────────────────────────────────────
-  if (doi) {
-    console.log(`Looking up DOI: ${doi}`);
-    const crossRefRes = await fetch(
-      `https://api.crossref.org/works/${encodeURIComponent(doi)}/transform/application/vnd.citationstyles.csl+json`
-    );
-
-    if (crossRefRes.ok) {
-      const csl = await crossRefRes.json();
-      console.log(`CrossRef metadata found`);
-      item = {
-        itemType: "journalArticle",
-        title: csl.title || url,
-        DOI: doi,
-        url,
-        publicationTitle: csl["container-title"] || "",
-        volume: csl.volume || "",
-        issue: csl.issue || "",
-        pages: csl.page || "",
-        date: csl.issued?.["date-parts"]?.[0]?.[0]?.toString() || "",
-        abstractNote: csl.abstract || "",
-        creators: (csl.author || []).map(a => ({
-          creatorType: "author",
-          firstName: a.given || "",
-          lastName: a.family || "",
-        })),
-        extra: `Shared by @${postedBy} in #papers`,
-        collections,
-      };
-    }
-  }
-
-  // ── Strategy 2: Scrape citation meta tags from the page ──────────────────
-  if (!item) {
-    console.log(`CrossRef failed or no DOI, scraping page metadata`);
-    const meta = await scrapeMetadata(url);
-
-    if (meta) {
-      console.log(`Scraped metadata: ${meta.title}`);
-      item = {
-        itemType: "journalArticle",
-        title: meta.title,
-        DOI: meta.doi || doi || "",
-        url,
-        publicationTitle: meta.journal || "",
-        volume: meta.volume || "",
-        issue: meta.issue || "",
-        pages: meta.pages || "",
-        date: meta.date || "",
-        abstractNote: meta.abstract || "",
-        creators: meta.creators,
-        extra: `Shared by @${postedBy} in #papers`,
-        collections,
-      };
-    }
-  }
-
-  // ── Strategy 3: Bare fallback ─────────────────────────────────────────────
-  if (!item) {
-    console.log(`No metadata found, saving bare URL`);
-    item = {
-      itemType: "webpage",
-      url,
-      title: url,
-      extra: `Shared by @${postedBy} in #papers`,
-      collections,
-    };
-  }
+  const item = {
+    ...await resolveReference(url),
+    extra: `Shared by @${postedBy} in #papers`,
+    collections,
+  };
 
   console.log(`Saving to: ${libraryPath}, collection: ${collections}`);
   console.log(`Collection: ${ZOTERO_COLLECTION}`);
@@ -330,9 +175,9 @@ app.post("/slack/events", async (req, res) => {
 
   const urls = [...new Set((event.text || "").match(URL_REGEX) || [])];
   const filteredUrls = urls.filter(u => !isBlockedUrl(u));
-  if (!urls.length) return;
+  if (!filteredUrls.length) return;
 
-  const newUrls = urls.filter((u) => !seenLinks.has(u));
+  const newUrls = filteredUrls.filter((u) => !seenLinks.has(u));
   if (!newUrls.length) return;
 
   // Extract tags from the message

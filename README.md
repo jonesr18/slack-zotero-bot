@@ -8,7 +8,9 @@ A Slack bot that monitors a channel for shared links and automatically saves the
 
 - Monitors a Slack channel (e.g. `#papers`) for posted links
 - Looks up full metadata via CrossRef for published papers
-- Scrapes `citation_*` meta tags for preprints (bioRxiv, medRxiv, etc.)
+- Normalizes versioned bioRxiv/medRxiv URLs before DOI lookup
+- Scrapes `citation_*` meta tags when Crossref metadata is unavailable
+- Saves recognized preprints using Zotero’s `preprint` item type
 - Falls back to saving a bare webpage item if no metadata is found
 - Saves items to a Zotero group library collection
 - Supports routing links to subfolders using `!tag` syntax
@@ -57,6 +59,7 @@ cd slack-zotero-bot
 4. Click **Install to Workspace** and copy the **Bot User OAuth Token** (starts with `xoxb-`)
 5. Under **Basic Information**, copy the **Signing Secret**
 6. Under **Event Subscriptions**:
+   - If **Socket Mode** is enabled in your Slack app settings, disable it so Slack delivers events to the Request URL.
    - Enable Events
    - Subscribe to the bot event `message.channels`
    - Set the Request URL to your Railway domain (see step 4 below) — you can come back to this after deploying
@@ -153,8 +156,8 @@ When a message is posted in the monitored channel, the bot:
 3. Skips any URLs it has already seen in this session
 4. Parses any `!tags` to determine which Zotero collection(s) to save to
 5. For each new URL, attempts to fetch metadata in order:
-   - **CrossRef** — used when a DOI is found in the URL or page
-   - **HTML scraping** — parses `citation_*` meta tags (works for bioRxiv, medRxiv, and most publishers)
+   - **CrossRef** — used when a DOI is found in the URL or explicit page metadata; query strings and bioRxiv/medRxiv version/PDF suffixes are removed from URL-derived DOIs
+   - **HTML scraping** — parses `citation_*` meta tags, including reordered attributes and quoted names; also used after Crossref errors. The page is fetched only once, with a 15-second timeout per request. DOIs in reference lists are ignored to avoid saving the wrong paper.
    - **Bare fallback** — saves the URL as a webpage item with no metadata
 6. Saves the item to Zotero via the Web API
 7. Reacts to the message with ✅ on success or ❌ on failure
@@ -194,5 +197,9 @@ Railway will detect the push and redeploy automatically within ~30 seconds.
 
 **Metadata not populating**
 - For published papers, check that the DOI is present in the URL or page source
-- For preprints, bioRxiv and medRxiv are fully supported via HTML scraping
+- For bioRxiv and medRxiv, DOI lookup works even for versioned and PDF links when Crossref has the record. Citation-tag scraping is the fallback when the page is accessible.
 - Some publisher pages render content via JavaScript and may not expose meta tags in raw HTML — these will fall back to a bare webpage item
+
+## Tests
+
+Run `npm test` to check metadata resolution with mocked HTTP responses. Tests do not write to Slack or Zotero. Changes affect newly processed links; existing webpage items in Zotero are not automatically repaired.
